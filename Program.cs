@@ -1,6 +1,7 @@
 ﻿using System.Net.Sockets;
 using System.Net;
 using System.Text;
+using System.IO.Compression;
 
 internal class Program
 {
@@ -26,9 +27,9 @@ internal class Program
                 string[] thirdLineParts = lines[2].Split(" ");
                 Console.WriteLine($"Third line parts:\r\n{string.Join(' ', thirdLineParts)}");
 
-
                 var (method, path, httpVer) = (firsLineParts[0], firsLineParts[1], firsLineParts[2]);
                 string response = string.Empty;
+                byte[] compressedByte = new byte[1024];
 
                 if (path == "/")
                 {
@@ -37,7 +38,17 @@ internal class Program
                 else if (path.StartsWith("/echo/"))
                 {
                     string message = path.Substring(6);
-                    response = $"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {message.Length}\r\n\r\n{message}";
+                    if (thirdLineParts[0] == "Accept-Encoding:" && (thirdLineParts[1..].Contains("gzip,") || thirdLineParts[1..].Contains("gzip")))
+                    {
+                        byte[] byteStr = Encoding.ASCII.GetBytes(message);
+                        compressedByte = GzipCompressor.Compress(byteStr);
+                        Console.WriteLine(Encoding.ASCII.GetString(compressedByte));
+                        response = $"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {compressedByte.Length}\r\n\r\n";
+                    }
+                    else
+                    {
+                        response = $"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {message.Length}\r\n\r\n{message}";
+                    }
                 }
                 else if (path == "/user-agent")
                 {
@@ -83,8 +94,7 @@ internal class Program
                     response = "HTTP/1.1 404 Not Found\r\n\r\n";
                 }
                 Console.WriteLine($"Response string:\r\n{response}");
-                //var response = path == "/" ? $"{httpVer} 200 OK\r\n\r\n" : $"{httpVer} 404 Not Found\r\n\r\n";
-                stream.Write(Encoding.ASCII.GetBytes(response));
+                stream.Write(Encoding.ASCII.GetBytes(response).Concat(compressedByte).ToArray());
 
                 client.Close();
             }
@@ -92,6 +102,22 @@ internal class Program
         catch (SocketException e)
         {
             Console.WriteLine("SocketException: {0}", e.Message);
+        }
+    }
+}
+
+public static class GzipCompressor
+{
+    public static byte[] Compress(byte[] data)
+    {
+        using (var compressedStream = new MemoryStream())
+        {
+            using (var zipStream = new GZipStream(compressedStream, CompressionMode.Compress, true))
+            {
+                zipStream.Write(data, 0, data.Length);
+                zipStream.Close();
+                return compressedStream.ToArray();
+            }
         }
     }
 }
